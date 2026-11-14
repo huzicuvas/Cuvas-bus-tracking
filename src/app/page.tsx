@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase'
 import type { Bus, Driver, Route } from '@/lib/types'
 import AdminForms from '@/components/AdminForms'
 import DriversSection from '@/components/DriversSection'
+import RoutesSection from '@/components/RoutesSection'
+import ConfirmDialog from '@/components/ConfirmDialog'
 
 // Leaflet touches window/document on import, so the map must load
 // client-side only — a direct import in an App Router page crashes the build.
@@ -36,6 +38,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [busError, setBusError] = useState('')
+  const [deletingBus, setDeletingBus] = useState<Bus | null>(null)
+  const [busDeleteBusy, setBusDeleteBusy] = useState(false)
 
   const fetchBuses = useCallback(async () => {
     const { data, error } = await supabase
@@ -89,6 +93,22 @@ export default function Home() {
     }
   }
 
+  async function confirmDeleteBus() {
+    if (!deletingBus) return
+    setBusDeleteBusy(true)
+    setBusError('')
+    const { error } = await supabase.from('buses').delete().eq('id', deletingBus.id)
+    setBusDeleteBusy(false)
+    if (error) {
+      setBusError(error.message)
+      setDeletingBus(null)
+      return
+    }
+    // Remove it from the UI instantly (its location history is deleted too)
+    setBuses((prev) => prev.filter((b) => b.id !== deletingBus.id))
+    setDeletingBus(null)
+  }
+
   useEffect(() => {
     fetchBuses()
     fetchRoutes()
@@ -140,12 +160,20 @@ export default function Home() {
                 <p className="mt-1 text-xs text-zinc-400">
                   Last updated: {timeAgo(bus.last_updated)}
                 </p>
-                <button
-                  onClick={() => toggleBusStatus(bus)}
-                  className="mt-3 rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50"
-                >
-                  {bus.status === 'running' ? 'Mark offline' : 'Mark running'}
-                </button>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => toggleBusStatus(bus)}
+                    className="rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50"
+                  >
+                    {bus.status === 'running' ? 'Mark offline' : 'Mark running'}
+                  </button>
+                  <button
+                    onClick={() => setDeletingBus(bus)}
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -159,7 +187,19 @@ export default function Home() {
         onUpdated={refreshAll}
       />
 
+      <RoutesSection routes={routes} onUpdated={refreshAll} />
+
       <AdminForms routes={routes} onAdded={refreshAll} />
+
+      {deletingBus && (
+        <ConfirmDialog
+          title="Delete bus?"
+          message={`Are you sure? Bus "${deletingBus.plate_number}" will be deleted, along with its location history.`}
+          busy={busDeleteBusy}
+          onConfirm={confirmDeleteBus}
+          onCancel={() => setDeletingBus(null)}
+        />
+      )}
     </main>
   )
 }

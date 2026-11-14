@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Bus, Driver, Route } from '@/lib/types'
+import ConfirmDialog from '@/components/ConfirmDialog'
 
 const inputCls =
   'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500'
@@ -198,10 +199,29 @@ export default function DriversSection({
   onUpdated: () => void
 }) {
   const [editing, setEditing] = useState<Driver | null>(null)
+  const [deleting, setDeleting] = useState<Driver | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  async function confirmDelete() {
+    if (!deleting) return
+    setDeleteBusy(true)
+    setDeleteError('')
+    const { error } = await supabase.from('drivers').delete().eq('id', deleting.id)
+    setDeleteBusy(false)
+    if (error) {
+      setDeleteError(error.message)
+      setDeleting(null)
+      return
+    }
+    setDeleting(null)
+    onUpdated()
+  }
 
   return (
     <section className="mt-8">
       <h2 className="mb-3 text-lg font-semibold">Drivers ({drivers.length})</h2>
+      {deleteError && <p className="mb-3 text-sm text-red-600">{deleteError}</p>}
       {drivers.length === 0 ? (
         <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
           No drivers yet — add one below.
@@ -228,12 +248,20 @@ export default function DriversSection({
               <p className="mt-1 text-sm text-zinc-600">
                 Bus: {d.buses?.plate_number ?? 'None'}
               </p>
-              <button
-                onClick={() => setEditing(d)}
-                className="mt-3 rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50"
-              >
-                Edit
-              </button>
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={() => setEditing(d)}
+                  className="rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => setDeleting(d)}
+                  className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                >
+                  Delete
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -248,6 +276,15 @@ export default function DriversSection({
             setEditing(null)
             onUpdated()
           }}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title="Delete driver?"
+          message={`Are you sure? "${deleting.name}" will be deleted. Any bus assigned to them will be kept, but unassigned.`}
+          busy={deleteBusy}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleting(null)}
         />
       )}
     </section>
