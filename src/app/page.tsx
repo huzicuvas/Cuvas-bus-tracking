@@ -1,69 +1,104 @@
-import Image from "next/image";
+'use client'
+
+import { useCallback, useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
+import { supabase } from '@/lib/supabase'
+import type { Bus } from '@/lib/types'
+
+// Leaflet touches window/document on import, so the map must load
+// client-side only — a direct import in an App Router page crashes the build.
+const BusMap = dynamic(() => import('@/components/BusMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[500px] w-full items-center justify-center rounded-xl bg-zinc-100 text-zinc-500">
+      Loading map...
+    </div>
+  ),
+})
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return 'Never'
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (seconds < 60) return 'Just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hr ago`
+  return new Date(iso).toLocaleString()
+}
 
 export default function Home() {
+  const [buses, setBuses] = useState<Bus[]>([])
+  const [loading, setLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+
+  const fetchBuses = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('buses')
+      // drivers!buses_driver_id_fkey: two FKs link buses and drivers
+      // (drivers.bus_id AND buses.driver_id), so the FK must be named.
+      .select('*, routes(name), drivers!buses_driver_id_fkey(name)')
+      .order('last_updated', { ascending: false, nullsFirst: false })
+    if (!error && data) {
+      setBuses(data as Bus[])
+      setLastRefresh(new Date())
+    }
+    setLoading(false)
+  }, [])
+
+  useEffect(() => {
+    fetchBuses()
+    const id = setInterval(fetchBuses, 10000)
+    return () => clearInterval(id)
+  }, [fetchBuses])
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="mx-auto w-full max-w-6xl p-4 sm:p-6">
+      <header className="mb-4">
+        <h1 className="text-2xl font-bold sm:text-3xl">CUVAS Bus Tracking</h1>
+        <p className="text-sm text-zinc-500">
+          Live bus locations, refreshed every 10 seconds
+          {lastRefresh ? ` · Last refresh ${lastRefresh.toLocaleTimeString()}` : ''}
+        </p>
+      </header>
+
+      <BusMap buses={buses} />
+
+      <section className="mt-6">
+        <h2 className="mb-3 text-lg font-semibold">Buses ({buses.length})</h2>
+        {loading ? (
+          <p className="text-zinc-500">Loading buses...</p>
+        ) : buses.length === 0 ? (
+          <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
+            No buses on the road right now
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+        ) : (
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {buses.map((bus) => (
+              <li key={bus.id} className="rounded-xl border p-4">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">{bus.plate_number}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      bus.status === 'running'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-zinc-100 text-zinc-600'
+                    }`}
+                  >
+                    {bus.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-zinc-600">
+                  {bus.drivers?.name ?? 'No driver'} · {bus.routes?.name ?? 'No route'}
+                </p>
+                <p className="mt-1 text-xs text-zinc-400">
+                  Last updated: {timeAgo(bus.last_updated)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </main>
+  )
 }

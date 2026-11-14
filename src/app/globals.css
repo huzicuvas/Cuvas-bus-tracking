@@ -24,3 +24,9 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Leaflet divIcon pins: no white box behind the SVG pin */
+.leaflet-div-icon {
+  background: transparent;
+  border: none;
+}
