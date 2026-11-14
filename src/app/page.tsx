@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '@/lib/supabase'
-import type { Bus, Route } from '@/lib/types'
+import type { Bus, Driver, Route } from '@/lib/types'
 import AdminForms from '@/components/AdminForms'
+import DriversSection from '@/components/DriversSection'
 
 // Leaflet touches window/document on import, so the map must load
 // client-side only — a direct import in an App Router page crashes the build.
@@ -31,8 +32,10 @@ function timeAgo(iso: string | null): string {
 export default function Home() {
   const [buses, setBuses] = useState<Bus[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
+  const [drivers, setDrivers] = useState<Driver[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [busError, setBusError] = useState('')
 
   const fetchBuses = useCallback(async () => {
     const { data, error } = await supabase
@@ -58,17 +61,41 @@ export default function Home() {
     }
   }, [])
 
+  const fetchDrivers = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('drivers')
+      .select('*, routes(name), buses!drivers_bus_id_fkey(plate_number)')
+      .order('name', { ascending: true })
+    if (!error && data) {
+      setDrivers(data as Driver[])
+    }
+  }, [])
+
   const refreshAll = useCallback(() => {
     fetchBuses()
     fetchRoutes()
-  }, [fetchBuses, fetchRoutes])
+    fetchDrivers()
+  }, [fetchBuses, fetchRoutes, fetchDrivers])
+
+  async function toggleBusStatus(bus: Bus) {
+    const next = bus.status === 'running' ? 'offline' : 'running'
+    setBusError('')
+    // Update the UI instantly, roll back if Supabase rejects it
+    setBuses((prev) => prev.map((b) => (b.id === bus.id ? { ...b, status: next } : b)))
+    const { error } = await supabase.from('buses').update({ status: next }).eq('id', bus.id)
+    if (error) {
+      setBuses((prev) => prev.map((b) => (b.id === bus.id ? { ...b, status: bus.status } : b)))
+      setBusError(error.message)
+    }
+  }
 
   useEffect(() => {
     fetchBuses()
     fetchRoutes()
+    fetchDrivers()
     const id = setInterval(fetchBuses, 10000)
     return () => clearInterval(id)
-  }, [fetchBuses, fetchRoutes])
+  }, [fetchBuses, fetchRoutes, fetchDrivers])
 
   return (
     <main className="mx-auto w-full max-w-6xl p-4 sm:p-6">
@@ -84,6 +111,7 @@ export default function Home() {
 
       <section className="mt-6">
         <h2 className="mb-3 text-lg font-semibold">Buses ({buses.length})</h2>
+        {busError && <p className="mb-3 text-sm text-red-600">{busError}</p>}
         {loading ? (
           <p className="text-zinc-500">Loading buses...</p>
         ) : buses.length === 0 ? (
@@ -112,11 +140,24 @@ export default function Home() {
                 <p className="mt-1 text-xs text-zinc-400">
                   Last updated: {timeAgo(bus.last_updated)}
                 </p>
+                <button
+                  onClick={() => toggleBusStatus(bus)}
+                  className="mt-3 rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50"
+                >
+                  {bus.status === 'running' ? 'Mark offline' : 'Mark running'}
+                </button>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      <DriversSection
+        drivers={drivers}
+        routes={routes}
+        buses={buses}
+        onUpdated={refreshAll}
+      />
 
       <AdminForms routes={routes} onAdded={refreshAll} />
     </main>

@@ -13,6 +13,18 @@ export type Route = {
   created_at: string
 }
 
+export type Driver = {
+  id: string
+  name: string
+  phone: string | null
+  route_id: string | null
+  bus_id: string | null
+  status: string
+  created_at: string
+  routes: { name: string } | null
+  buses: { plate_number: string } | null
+}
+
 export type Bus = {
   id: string
   plate_number: string
