@@ -22,9 +22,10 @@ const BusMap = dynamic(() => import('@/components/BusMap'), {
   ),
 })
 
-function timeAgo(iso: string | null): string {
+function timeAgo(iso: string | null, now: number | null): string {
   if (!iso) return 'Never'
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (!now) return '…'
+  const seconds = Math.floor((now - new Date(iso).getTime()) / 1000)
   if (seconds < 60) return 'Just now'
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes} min ago`
@@ -35,9 +36,9 @@ function timeAgo(iso: string | null): string {
 
 // A bus counts as live ("Running") only when it is marked running AND its
 // location was updated in the last 60 seconds.
-function isBusLive(bus: Bus): boolean {
-  if (bus.status !== 'running' || !bus.last_updated) return false
-  return Date.now() - new Date(bus.last_updated).getTime() < 60_000
+function isBusLive(bus: Bus, now: number | null): boolean {
+  if (!now || bus.status !== 'running' || !bus.last_updated) return false
+  return now - new Date(bus.last_updated).getTime() < 60_000
 }
 
 export default function Home() {
@@ -46,8 +47,15 @@ export default function Home() {
   const [drivers, setDrivers] = useState<Driver[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  // True while the Realtime channel is connected; false means the page
+  // fell back to refreshing every 10 seconds (see the subscribe callback)
+  const [live, setLive] = useState(false)
+  // Clock tick: set on mount, then re-renders every 10s so "Running /
+  // Offline" and "x min ago" go stale on time even though no data is
+  // fetched anymore. (Next 16 forbids Date.now() during the first render.)
+  const [now, setNow] = useState<number | null>(null)
   const [deletingBus, setDeletingBus] = useState<Bus | null>(null)
-  // Buses refresh every 10s — only toast a load failure once, on first load
+  // Buses now arrive over Realtime — only toast a load failure once, on first load
   const firstBusLoad = useRef(true)
   const [busDeleteBusy, setBusDeleteBusy] = useState(false)
   const [routeFilter, setRouteFilter] = useState('')
@@ -70,6 +78,24 @@ export default function Home() {
     }
     setLoading(false)
     firstBusLoad.current = false
+  }, [])
+
+  // Re-fetch a single bus with its route/driver names joined in.
+  // Realtime payloads carry the raw row only (no joins), so a changed bus
+  // is refreshed this way instead of trusting payload.new.
+  const fetchOneBus = useCallback(async (id: string) => {
+    const { data, error } = await supabase
+      .from('buses')
+      .select('*, routes(name), drivers!buses_driver_id_fkey(name)')
+      .eq('id', id)
+      .single()
+    if (error || !data) return
+    const row = data as Bus
+    setBuses((prev) => {
+      const exists = prev.some((b) => b.id === row.id)
+      if (exists) return prev.map((b) => (b.id === row.id ? row : b))
+      return [row, ...prev]
+    })
   }, [])
 
   const fetchRoutes = useCallback(async () => {
@@ -135,15 +161,59 @@ export default function Home() {
     fetchBuses()
     fetchRoutes()
     fetchDrivers()
-    const id = setInterval(fetchBuses, 10000)
-    return () => clearInterval(id)
-  }, [fetchBuses, fetchRoutes, fetchDrivers])
+    // Live updates: Supabase pushes every buses change the moment it happens.
+    // If Realtime can't connect (or isn't enabled for the buses table),
+    // fall back to the old 10-second refresh so the page never goes stale.
+    let pollId: ReturnType<typeof setInterval> | undefined
+    const channel = supabase
+      .channel('buses-live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'buses' },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            setBuses((prev) =>
+              prev.filter((b) => b.id !== (payload.old as { id: string }).id),
+            )
+          } else if (
+            payload.new &&
+            typeof payload.new === 'object' &&
+            'id' in payload.new
+          ) {
+            fetchOneBus((payload.new as { id: string }).id)
+          }
+          setLastRefresh(new Date())
+        },
+      )
+      .subscribe((status) => {
+        setLive(status === 'SUBSCRIBED')
+        if (status === 'SUBSCRIBED') {
+          if (pollId) {
+            clearInterval(pollId)
+            pollId = undefined
+          }
+        } else if (!pollId) {
+          pollId = setInterval(fetchBuses, 10000)
+        }
+      })
+    return () => {
+      if (pollId) clearInterval(pollId)
+      supabase.removeChannel(channel)
+    }
+  }, [fetchBuses, fetchRoutes, fetchDrivers, fetchOneBus])
 
-  // Summary counts (recomputed on every refresh, so the 60-second
+  // Clock tick only — no fetching, just re-renders so freshness re-evaluates
+  useEffect(() => {
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 10000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Summary counts (recomputed on every render, so the 60-second
   // running/offline line moves as locations go stale)
-  const busesRunning = buses.filter(isBusLive).length
+  const busesRunning = buses.filter((b) => isBusLive(b, now)).length
   const routesActive = routes.filter((r) =>
-    buses.some((b) => b.route_id === r.id && isBusLive(b)),
+    buses.some((b) => b.route_id === r.id && isBusLive(b, now)),
   ).length
   const driversOnDuty = drivers.filter((d) => d.status === 'on_duty').length
 
@@ -163,8 +233,10 @@ export default function Home() {
       <header className="mb-4">
         <h1 className="text-2xl font-bold sm:text-3xl">CUVAS Bus Tracking</h1>
         <p className="text-sm text-zinc-500">
-          Live bus locations, refreshed every 10 seconds
-          {lastRefresh ? ` · Last refresh ${lastRefresh.toLocaleTimeString()}` : ''}
+          {live
+            ? 'Live bus locations, updated in real time'
+            : 'Live bus locations, refreshed every 10 seconds'}
+          {lastRefresh ? ` · Last update ${lastRefresh.toLocaleTimeString()}` : ''}
         </p>
       </header>
 
@@ -239,26 +311,26 @@ export default function Home() {
               <li
                 key={bus.id}
                 className={`rounded-xl border p-4 ${
-                  isBusLive(bus) ? 'border-green-300' : ''
+                  isBusLive(bus, now) ? 'border-green-300' : ''
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">{bus.plate_number}</span>
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      isBusLive(bus)
+                      isBusLive(bus, now)
                         ? 'bg-green-100 text-green-800'
                         : 'bg-zinc-100 text-zinc-600'
                     }`}
                   >
-                    {isBusLive(bus) ? 'Running' : 'Offline'}
+                    {isBusLive(bus, now) ? 'Running' : 'Offline'}
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-zinc-600">
                   {bus.drivers?.name ?? 'No driver'} · {bus.routes?.name ?? 'No route'}
                 </p>
                 <p className="mt-1 text-xs text-zinc-400">
-                  Last updated: {timeAgo(bus.last_updated)}
+                  Last updated: {timeAgo(bus.last_updated, now)}
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
