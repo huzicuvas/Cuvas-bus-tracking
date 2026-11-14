@@ -217,6 +217,18 @@ export default function Home() {
     window.scrollTo(0, 0)
   }, [selectedRouteId])
 
+  // Deep link from the Routes page (?route=<id>) — open that route's live
+  // tracking straight away. Runs once, after the routes have loaded.
+  const deepLinkApplied = useRef(false)
+  useEffect(() => {
+    if (deepLinkApplied.current || routes.length === 0) return
+    deepLinkApplied.current = true
+    const id = new URLSearchParams(window.location.search).get('route')
+    if (id && routes.some((r) => r.id === id)) {
+      setSelectedRouteId(id)
+    }
+  }, [routes])
+
   // Speeds change when the driver app writes new GPS rows, which has no
   // Realtime channel — refresh them on the same 10-second rhythm.
   useEffect(() => {
@@ -306,6 +318,7 @@ export default function Home() {
             >
               Live Buses
             </a>
+            <Link href="/routes" className="hover:text-white">Routes</Link>
             <Link href="/admin" className="hover:text-white">Admin</Link>
           </nav>
           <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${live ? 'bg-green-500/15 text-green-400' : 'bg-slate-700/60 text-slate-300'}`}>
@@ -402,16 +415,12 @@ export default function Home() {
                     })}
                   </ul>
                 )}
-                <a
-                  href="#live-tracker"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    document.getElementById('live-tracker')?.scrollIntoView({ behavior: 'smooth' })
-                  }}
+                <Link
+                  href="/routes"
                   className="mt-3 block text-center text-xs font-semibold text-amber-400 hover:text-amber-300"
                 >
                   View All {routes.length} Routes →
-                </a>
+                </Link>
               </aside>
             </div>
           </section>
@@ -471,8 +480,11 @@ export default function Home() {
                   return (
                     <li key={r.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
                       <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-base font-bold text-white">{r.name}</h3>
+                        <button
+                          onClick={() => setSelectedRouteId(r.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <h3 className="truncate text-base font-bold text-white hover:text-amber-400">{r.name}</h3>
                           <p className="truncate text-xs text-slate-400">
                             {r.start_point ?? '—'} → {r.end_point ?? '—'}
                           </p>
@@ -482,7 +494,7 @@ export default function Home() {
                               : 'Not assigned'}
                             {bus ? ` · ${bus.plate_number}` : ''}
                           </p>
-                        </div>
+                        </button>
                         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.badge}`}>
                           {st.label}
                         </span>
@@ -509,19 +521,12 @@ export default function Home() {
                         )}
                       </p>
 
-                      {r.stops?.length ? (
-                        <div className="mt-2 border-t border-slate-800 pt-2">
-                          <p className="text-[11px] font-semibold tracking-wider text-slate-400">ALL STOPS</p>
-                          <ol className="mt-1 space-y-0.5 text-xs text-slate-300">
-                            {r.stops.map((s, i) => (
-                              <li key={`${s.name}-${i}`} className="flex gap-2">
-                                <span className="font-semibold text-amber-400">{i + 1}.</span>
-                                <span>{s.name}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      ) : null}
+                      <p className="mt-2 border-t border-slate-800 pt-2 text-xs text-slate-400">
+                        {r.stops?.length ?? 0} stops ·{' '}
+                        <Link href="/routes" className="font-semibold text-amber-400 hover:text-amber-300">
+                          See all stops →
+                        </Link>
+                      </p>
 
                       <button
                         onClick={() => setSelectedRouteId(r.id)}
