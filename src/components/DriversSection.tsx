@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '@/lib/supabase'
+import { showToast } from '@/lib/toast'
 import type { Bus, Driver, Route } from '@/lib/types'
 import ConfirmDialog from '@/components/ConfirmDialog'
 
@@ -57,7 +58,7 @@ function EditDriverModal({
       })
       .eq('id', driver.id)
     if (error) {
-      setError(error.message)
+      showToast(error.message, 'error')
       setBusy(false)
       return
     }
@@ -73,13 +74,14 @@ function EditDriverModal({
           .update({ driver_id: driver.id })
           .eq('id', busId)
         if (busError) {
-          setError(busError.message)
+          showToast(busError.message, 'error')
           setBusy(false)
           return
         }
       }
     }
     setBusy(false)
+    showToast('Driver updated.')
     onSaved()
   }
 
@@ -201,27 +203,25 @@ export default function DriversSection({
   const [editing, setEditing] = useState<Driver | null>(null)
   const [deleting, setDeleting] = useState<Driver | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
-  const [deleteError, setDeleteError] = useState('')
 
   async function confirmDelete() {
     if (!deleting) return
     setDeleteBusy(true)
-    setDeleteError('')
     const { error } = await supabase.from('drivers').delete().eq('id', deleting.id)
     setDeleteBusy(false)
     if (error) {
-      setDeleteError(error.message)
+      showToast(error.message, 'error')
       setDeleting(null)
       return
     }
     setDeleting(null)
+    showToast('Driver deleted.')
     onUpdated()
   }
 
   return (
     <section className="mt-8">
       <h2 className="mb-3 text-lg font-semibold">Drivers ({drivers.length})</h2>
-      {deleteError && <p className="mb-3 text-sm text-red-600">{deleteError}</p>}
       {drivers.length === 0 ? (
         <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
           No drivers yet — add one below.

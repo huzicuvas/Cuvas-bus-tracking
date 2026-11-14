@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '@/lib/supabase'
+import { showToast } from '@/lib/toast'
 import type { Route, RouteStop } from '@/lib/types'
 
 const inputCls =
@@ -34,13 +35,11 @@ function RouteForm({ onAdded }: { onAdded: () => void }) {
   const [endPoint, setEndPoint] = useState('')
   const [stopsText, setStopsText] = useState('')
   const [error, setError] = useState('')
-  const [ok, setOk] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    setOk('')
     if (!name.trim()) {
       setError('Route name is required.')
       return
@@ -54,14 +53,14 @@ function RouteForm({ onAdded }: { onAdded: () => void }) {
     })
     setBusy(false)
     if (error) {
-      setError(error.message)
+      showToast(error.message, 'error')
       return
     }
     setName('')
     setStartPoint('')
     setEndPoint('')
     setStopsText('')
-    setOk('Route added.')
+    showToast('Route added.')
     onAdded()
   }
 
@@ -119,7 +118,6 @@ function RouteForm({ onAdded }: { onAdded: () => void }) {
           />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {ok && <p className="text-sm text-green-600">{ok}</p>}
         <button type="submit" className={btnCls} disabled={busy}>
           {busy ? 'Adding...' : 'Add route'}
         </button>
@@ -133,13 +131,11 @@ function DriverForm({ routes, onAdded }: { routes: Route[]; onAdded: () => void 
   const [phone, setPhone] = useState('')
   const [routeId, setRouteId] = useState('')
   const [error, setError] = useState('')
-  const [ok, setOk] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    setOk('')
     if (!name.trim()) {
       setError('Driver name is required.')
       return
@@ -152,13 +148,13 @@ function DriverForm({ routes, onAdded }: { routes: Route[]; onAdded: () => void 
     })
     setBusy(false)
     if (error) {
-      setError(error.message)
+      showToast(error.message, 'error')
       return
     }
     setName('')
     setPhone('')
     setRouteId('')
-    setOk('Driver added.')
+    showToast('Driver added.')
     onAdded()
   }
 
@@ -210,7 +206,6 @@ function DriverForm({ routes, onAdded }: { routes: Route[]; onAdded: () => void 
           </select>
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {ok && <p className="text-sm text-green-600">{ok}</p>}
         <button type="submit" className={btnCls} disabled={busy}>
           {busy ? 'Adding...' : 'Add driver'}
         </button>
@@ -223,13 +218,11 @@ function BusForm({ routes, onAdded }: { routes: Route[]; onAdded: () => void }) 
   const [plate, setPlate] = useState('')
   const [routeId, setRouteId] = useState('')
   const [error, setError] = useState('')
-  const [ok, setOk] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    setOk('')
     if (!plate.trim()) {
       setError('Plate number is required.')
       return
@@ -241,12 +234,12 @@ function BusForm({ routes, onAdded }: { routes: Route[]; onAdded: () => void }) 
     })
     setBusy(false)
     if (error) {
-      setError(error.message)
+      showToast(error.message, 'error')
       return
     }
     setPlate('')
     setRouteId('')
-    setOk('Bus added.')
+    showToast('Bus added.')
     onAdded()
   }
 
@@ -285,7 +278,6 @@ function BusForm({ routes, onAdded }: { routes: Route[]; onAdded: () => void }) 
           </select>
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {ok && <p className="text-sm text-green-600">{ok}</p>}
         <button type="submit" className={btnCls} disabled={busy}>
           {busy ? 'Adding...' : 'Add bus'}
         </button>

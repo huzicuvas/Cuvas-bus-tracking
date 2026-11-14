@@ -1,13 +1,15 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '@/lib/supabase'
+import { showToast } from '@/lib/toast'
 import type { Bus, Driver, Route } from '@/lib/types'
 import AdminForms from '@/components/AdminForms'
 import DriversSection from '@/components/DriversSection'
 import RoutesSection from '@/components/RoutesSection'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import Toasts from '@/components/Toasts'
 
 // Leaflet touches window/document on import, so the map must load
 // client-side only — a direct import in an App Router page crashes the build.
@@ -44,8 +46,9 @@ export default function Home() {
   const [drivers, setDrivers] = useState<Driver[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-  const [busError, setBusError] = useState('')
   const [deletingBus, setDeletingBus] = useState<Bus | null>(null)
+  // Buses refresh every 10s — only toast a load failure once, on first load
+  const firstBusLoad = useRef(true)
   const [busDeleteBusy, setBusDeleteBusy] = useState(false)
   const [routeFilter, setRouteFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -57,11 +60,16 @@ export default function Home() {
       // (drivers.bus_id AND buses.driver_id), so the FK must be named.
       .select('*, routes(name), drivers!buses_driver_id_fkey(name)')
       .order('last_updated', { ascending: false, nullsFirst: false })
-    if (!error && data) {
+    if (error) {
+      if (firstBusLoad.current) {
+        showToast('Could not load buses. Check your connection and refresh.', 'error')
+      }
+    } else if (data) {
       setBuses(data as Bus[])
       setLastRefresh(new Date())
     }
     setLoading(false)
+    firstBusLoad.current = false
   }, [])
 
   const fetchRoutes = useCallback(async () => {
@@ -69,7 +77,9 @@ export default function Home() {
       .from('routes')
       .select('*')
       .order('name', { ascending: true })
-    if (!error && data) {
+    if (error) {
+      showToast('Could not load routes.', 'error')
+    } else if (data) {
       setRoutes(data as Route[])
     }
   }, [])
@@ -79,7 +89,9 @@ export default function Home() {
       .from('drivers')
       .select('*, routes(name), buses!drivers_bus_id_fkey(plate_number)')
       .order('name', { ascending: true })
-    if (!error && data) {
+    if (error) {
+      showToast('Could not load drivers.', 'error')
+    } else if (data) {
       setDrivers(data as Driver[])
     }
   }, [])
@@ -92,30 +104,31 @@ export default function Home() {
 
   async function toggleBusStatus(bus: Bus) {
     const next = bus.status === 'running' ? 'offline' : 'running'
-    setBusError('')
     // Update the UI instantly, roll back if Supabase rejects it
     setBuses((prev) => prev.map((b) => (b.id === bus.id ? { ...b, status: next } : b)))
     const { error } = await supabase.from('buses').update({ status: next }).eq('id', bus.id)
     if (error) {
       setBuses((prev) => prev.map((b) => (b.id === bus.id ? { ...b, status: bus.status } : b)))
-      setBusError(error.message)
+      showToast(error.message, 'error')
+      return
     }
+    showToast(`Bus ${bus.plate_number} marked ${next}.`)
   }
 
   async function confirmDeleteBus() {
     if (!deletingBus) return
     setBusDeleteBusy(true)
-    setBusError('')
     const { error } = await supabase.from('buses').delete().eq('id', deletingBus.id)
     setBusDeleteBusy(false)
     if (error) {
-      setBusError(error.message)
+      showToast(error.message, 'error')
       setDeletingBus(null)
       return
     }
     // Remove it from the UI instantly (its location history is deleted too)
     setBuses((prev) => prev.filter((b) => b.id !== deletingBus.id))
     setDeletingBus(null)
+    showToast(`Bus ${deletingBus.plate_number} deleted.`)
   }
 
   useEffect(() => {
@@ -177,7 +190,6 @@ export default function Home() {
           Buses ({filteredBuses.length}
           {filtersActive ? ` of ${buses.length}` : ''})
         </h2>
-        {busError && <p className="mb-3 text-sm text-red-600">{busError}</p>}
         <div className="mb-3 flex flex-col gap-2 sm:flex-row">
           <select
             className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
@@ -288,6 +300,8 @@ export default function Home() {
           onCancel={() => setDeletingBus(null)}
         />
       )}
+
+      <Toasts />
     </main>
   )
 }
