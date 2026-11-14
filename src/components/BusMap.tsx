@@ -50,7 +50,7 @@ export default function BusMap({ buses, stops }: { buses: Bus[]; stops: RouteSto
         attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
       />
-      {line.length >= 2 && <Polyline positions={line} color="#247bff" weight={4} />}
+      {line.length >= 2 && <Polyline positions={line} color="#22c55e" weight={4} />}
       {stops.map((s, i) =>
         s.lat != null && s.lng != null ? (
           <Marker key={`${s.name}-${i}`} position={[s.lat, s.lng]} icon={stopIcon(i + 1)}>
