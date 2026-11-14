@@ -27,9 +27,12 @@ export default function BusMap({ buses }: { buses: Bus[] }) {
       style={{ height: '500px', width: '100%' }}
       className="z-0 rounded-xl"
     >
+      {/* Esri World Street Map: clean light map, free, no API key needed.
+          Temporary stand-in for Google Maps (final version).
+          Note the {z}/{y}/{x} order — Esri puts y before x. */}
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
       />
       {located.map((bus) => (
         <Marker key={bus.id} position={[bus.current_lat!, bus.current_lng!]} icon={busIcon}>
