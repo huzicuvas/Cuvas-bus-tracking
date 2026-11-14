@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { showToast } from '@/lib/toast'
+import { isBusLive, timeAgo } from '@/lib/live'
+import { computeStopProgress } from '@/lib/geo'
 import type { Bus, Driver, Route } from '@/lib/types'
-import AdminForms from '@/components/AdminForms'
-import DriversSection from '@/components/DriversSection'
-import RoutesSection from '@/components/RoutesSection'
-import ConfirmDialog from '@/components/ConfirmDialog'
 import Toasts from '@/components/Toasts'
 
 // Leaflet touches window/document on import, so the map must load
@@ -21,25 +20,6 @@ const BusMap = dynamic(() => import('@/components/BusMap'), {
     </div>
   ),
 })
-
-function timeAgo(iso: string | null, now: number | null): string {
-  if (!iso) return 'Never'
-  if (!now) return '…'
-  const seconds = Math.floor((now - new Date(iso).getTime()) / 1000)
-  if (seconds < 60) return 'Just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} min ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} hr ago`
-  return new Date(iso).toLocaleString()
-}
-
-// A bus counts as live ("Running") only when it is marked running AND its
-// location was updated in the last 60 seconds.
-function isBusLive(bus: Bus, now: number | null): boolean {
-  if (!now || bus.status !== 'running' || !bus.last_updated) return false
-  return now - new Date(bus.last_updated).getTime() < 60_000
-}
 
 export default function Home() {
   const [buses, setBuses] = useState<Bus[]>([])
@@ -54,11 +34,9 @@ export default function Home() {
   // Offline" and "x min ago" go stale on time even though no data is
   // fetched anymore. (Next 16 forbids Date.now() during the first render.)
   const [now, setNow] = useState<number | null>(null)
-  const [deletingBus, setDeletingBus] = useState<Bus | null>(null)
   // Buses now arrive over Realtime — only toast a load failure once, on first load
   const firstBusLoad = useRef(true)
-  const [busDeleteBusy, setBusDeleteBusy] = useState(false)
-  const [routeFilter, setRouteFilter] = useState('')
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
   const fetchBuses = useCallback(async () => {
@@ -122,41 +100,6 @@ export default function Home() {
     }
   }, [])
 
-  const refreshAll = useCallback(() => {
-    fetchBuses()
-    fetchRoutes()
-    fetchDrivers()
-  }, [fetchBuses, fetchRoutes, fetchDrivers])
-
-  async function toggleBusStatus(bus: Bus) {
-    const next = bus.status === 'running' ? 'offline' : 'running'
-    // Update the UI instantly, roll back if Supabase rejects it
-    setBuses((prev) => prev.map((b) => (b.id === bus.id ? { ...b, status: next } : b)))
-    const { error } = await supabase.from('buses').update({ status: next }).eq('id', bus.id)
-    if (error) {
-      setBuses((prev) => prev.map((b) => (b.id === bus.id ? { ...b, status: bus.status } : b)))
-      showToast(error.message, 'error')
-      return
-    }
-    showToast(`Bus ${bus.plate_number} marked ${next}.`)
-  }
-
-  async function confirmDeleteBus() {
-    if (!deletingBus) return
-    setBusDeleteBusy(true)
-    const { error } = await supabase.from('buses').delete().eq('id', deletingBus.id)
-    setBusDeleteBusy(false)
-    if (error) {
-      showToast(error.message, 'error')
-      setDeletingBus(null)
-      return
-    }
-    // Remove it from the UI instantly (its location history is deleted too)
-    setBuses((prev) => prev.filter((b) => b.id !== deletingBus.id))
-    setDeletingBus(null)
-    showToast(`Bus ${deletingBus.plate_number} deleted.`)
-  }
-
   useEffect(() => {
     fetchBuses()
     fetchRoutes()
@@ -217,27 +160,45 @@ export default function Home() {
   ).length
   const driversOnDuty = drivers.filter((d) => d.status === 'on_duty').length
 
+  const selectedRoute = routes.find((r) => r.id === selectedRouteId) ?? null
+  const routeBuses = selectedRoute ? buses.filter((b) => b.route_id === selectedRoute.id) : []
+  // Prefer the live bus on this route; fall back to the first bus on it
+  const routeBus =
+    routeBuses.find((b) => isBusLive(b, now)) ?? routeBuses[0] ?? null
+  const routeDrivers = selectedRoute
+    ? drivers.filter((d) => d.route_id === selectedRoute.id)
+    : []
+  const progress = selectedRoute
+    ? computeStopProgress(routeBus?.current_lat ?? null, routeBus?.current_lng ?? null, selectedRoute.stops ?? [])
+    : null
+
   const query = searchQuery.trim().toLowerCase()
-  const filteredBuses = buses.filter((b) => {
-    if (routeFilter && b.route_id !== routeFilter) return false
+  const filteredRoutes = routes.filter((r) => {
     if (!query) return true
+    const routeDrivers = drivers.filter((d) => d.route_id === r.id)
     return (
-      b.plate_number.toLowerCase().includes(query) ||
-      (b.drivers?.name ?? '').toLowerCase().includes(query)
+      r.name.toLowerCase().includes(query) ||
+      (r.start_point ?? '').toLowerCase().includes(query) ||
+      (r.end_point ?? '').toLowerCase().includes(query) ||
+      routeDrivers.some((d) => d.name.toLowerCase().includes(query))
     )
   })
-  const filtersActive = routeFilter !== '' || query !== ''
 
   return (
     <main className="mx-auto w-full max-w-6xl p-4 sm:p-6">
-      <header className="mb-4">
-        <h1 className="text-2xl font-bold sm:text-3xl">CUVAS Bus Tracking</h1>
-        <p className="text-sm text-zinc-500">
-          {live
-            ? 'Live bus locations, updated in real time'
-            : 'Live bus locations, refreshed every 10 seconds'}
-          {lastRefresh ? ` · Last update ${lastRefresh.toLocaleTimeString()}` : ''}
-        </p>
+      <header className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold sm:text-3xl">CUVAS Bus Tracking</h1>
+          <p className="text-sm text-zinc-500">
+            {live
+              ? 'Live bus locations, updated in real time'
+              : 'Live bus locations, refreshed every 10 seconds'}
+            {lastRefresh ? ` · Last update ${lastRefresh.toLocaleTimeString()}` : ''}
+          </p>
+        </div>
+        <Link href="/admin" className="shrink-0 rounded-lg border px-3 py-2 text-sm hover:bg-zinc-50">
+          Admin
+        </Link>
       </header>
 
       <section className="mb-4 grid grid-cols-3 gap-3">
@@ -255,122 +216,181 @@ export default function Home() {
         </div>
       </section>
 
-      <BusMap buses={buses} />
-
-      <section className="mt-6">
-        <h2 className="mb-3 text-lg font-semibold">
-          Buses ({filteredBuses.length}
-          {filtersActive ? ` of ${buses.length}` : ''})
-        </h2>
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-          <select
-            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-            value={routeFilter}
-            onChange={(e) => setRouteFilter(e.target.value)}
-            aria-label="Filter by route"
-          >
-            <option value="">All routes</option>
-            {routes.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+      {selectedRoute == null ? (
+        <section>
+          <h2 className="mb-3 text-lg font-semibold">Choose your route</h2>
           <input
-            className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+            className="mb-3 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
             type="search"
-            placeholder="Search by driver name or plate number"
+            placeholder="Search by route, place or driver name"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          {filtersActive && (
-            <button
-              onClick={() => {
-                setRouteFilter('')
-                setSearchQuery('')
-              }}
-              className="rounded-lg border px-3 py-2 text-sm hover:bg-zinc-50"
-            >
-              Clear filters
-            </button>
+          {loading ? (
+            <p className="text-zinc-500">Loading routes...</p>
+          ) : routes.length === 0 ? (
+            <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
+              No routes yet — the admin adds them.
+            </p>
+          ) : filteredRoutes.length === 0 ? (
+            <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
+              No routes match your search
+            </p>
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {filteredRoutes.map((r) => {
+                const rDrivers = drivers.filter((d) => d.route_id === r.id)
+                const rBuses = buses.filter((b) => b.route_id === r.id)
+                const liveBus = rBuses.find((b) => isBusLive(b, now))
+                return (
+                  <li key={r.id}>
+                    <button
+                      onClick={() => setSelectedRouteId(r.id)}
+                      className="w-full rounded-xl border p-4 text-left hover:border-blue-400 hover:bg-blue-50/40"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold">{r.name}</span>
+                        {liveBus ? (
+                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+                            Running now
+                          </span>
+                        ) : rBuses.length > 0 ? (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                            Offline
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                            No bus
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm text-zinc-600">
+                        {r.start_point ?? '—'} → {r.end_point ?? '—'}
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-600">
+                        Driver: {rDrivers.length ? rDrivers.map((d) => d.name).join(', ') : 'Not assigned'}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        {r.stops?.length ?? 0} stops
+                        {liveBus ? ` · Bus ${liveBus.plate_number}` : rBuses.length ? ` · Bus ${rBuses[0].plate_number}` : ''}
+                      </p>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
           )}
-        </div>
-        {loading ? (
-          <p className="text-zinc-500">Loading buses...</p>
-        ) : buses.length === 0 ? (
-          <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
-            No buses on the road right now
-          </p>
-        ) : filteredBuses.length === 0 ? (
-          <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
-            No buses match your filter
-          </p>
-        ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {filteredBuses.map((bus) => (
-              <li
-                key={bus.id}
-                className={`rounded-xl border p-4 ${
-                  isBusLive(bus, now) ? 'border-green-300' : ''
+        </section>
+      ) : (
+        <section>
+          <button
+            onClick={() => setSelectedRouteId(null)}
+            className="mb-3 rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50"
+          >
+            ← All routes
+          </button>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-xl font-bold">{selectedRoute.name}</h2>
+              <p className="text-sm text-zinc-600">
+                {selectedRoute.start_point ?? '—'} → {selectedRoute.end_point ?? '—'}
+                {' · '}Driver: {routeDrivers.length ? routeDrivers.map((d) => d.name).join(', ') : 'Not assigned'}
+              </p>
+            </div>
+            {routeBus ? (
+              <span
+                className={`rounded-full px-3 py-1 text-sm font-medium ${
+                  isBusLive(routeBus, now)
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-zinc-100 text-zinc-600'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold">{bus.plate_number}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      isBusLive(bus, now)
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-zinc-100 text-zinc-600'
+                Bus {routeBus.plate_number} · {isBusLive(routeBus, now) ? 'Running' : 'Offline'}
+                {' · '}updated {timeAgo(routeBus.last_updated, now)}
+              </span>
+            ) : (
+              <span className="rounded-full bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-600">
+                No bus on this route right now
+              </span>
+            )}
+          </div>
+
+          <BusMap key={selectedRoute.id} buses={routeBuses} stops={selectedRoute.stops ?? []} />
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border p-4">
+              <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">Previous stop</p>
+              <p className="mt-1 text-lg font-semibold">
+                {progress == null || (progress.prevIndex == null && !progress.atStop)
+                  ? routeBus == null
+                    ? 'No bus on this route'
+                    : routeBus.current_lat == null
+                      ? 'Waiting for live location…'
+                      : 'Journey not started'
+                  : selectedRoute.stops[progress.prevIndex!].name}
+              </p>
+              {progress?.atStop && progress.prevIndex != null && (
+                <p className="text-sm text-green-700">Bus is here now</p>
+              )}
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
+              <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">Next stop</p>
+              <p className="mt-1 text-lg font-semibold">
+                {progress == null || progress.nextIndex == null
+                  ? routeBus == null
+                    ? 'No bus on this route'
+                    : routeBus.current_lat == null
+                      ? 'Waiting for live location…'
+                      : 'End of route'
+                  : selectedRoute.stops[progress.nextIndex].name}
+              </p>
+              {progress?.nextDistanceKm != null && (
+                <p className="text-sm text-zinc-600">
+                  {progress.nextDistanceKm < 1
+                    ? `${Math.round(progress.nextDistanceKm * 1000)} m away`
+                    : `${progress.nextDistanceKm.toFixed(1)} km away`}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <h3 className="mt-6 mb-3 text-lg font-semibold">All stops</h3>
+          {(selectedRoute.stops?.length ?? 0) === 0 ? (
+            <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
+              No stops added for this route yet.
+            </p>
+          ) : (
+            <ol className="space-y-2">
+              {selectedRoute.stops.map((s, i) => {
+                const isNext = progress?.nextIndex === i
+                const passed = progress?.nextIndex != null && i < progress.nextIndex
+                return (
+                  <li
+                    key={`${s.name}-${i}`}
+                    className={`flex items-center gap-3 rounded-xl border p-3 ${
+                      isNext ? 'border-blue-300 bg-blue-50/60' : passed ? 'opacity-60' : ''
                     }`}
                   >
-                    {isBusLive(bus, now) ? 'Running' : 'Offline'}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-zinc-600">
-                  {bus.drivers?.name ?? 'No driver'} · {bus.routes?.name ?? 'No route'}
-                </p>
-                <p className="mt-1 text-xs text-zinc-400">
-                  Last updated: {timeAgo(bus.last_updated, now)}
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => toggleBusStatus(bus)}
-                    className="rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50"
-                  >
-                    {bus.status === 'running' ? 'Mark offline' : 'Mark running'}
-                  </button>
-                  <button
-                    onClick={() => setDeletingBus(bus)}
-                    className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <DriversSection
-        drivers={drivers}
-        routes={routes}
-        buses={buses}
-        onUpdated={refreshAll}
-      />
-
-      <RoutesSection routes={routes} onUpdated={refreshAll} />
-
-      <AdminForms routes={routes} onAdded={refreshAll} />
-
-      {deletingBus && (
-        <ConfirmDialog
-          title="Delete bus?"
-          message={`Are you sure? Bus "${deletingBus.plate_number}" will be deleted, along with its location history.`}
-          busy={busDeleteBusy}
-          onConfirm={confirmDeleteBus}
-          onCancel={() => setDeletingBus(null)}
-        />
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                        isNext ? 'bg-blue-600 text-white' : passed ? 'bg-green-100 text-green-800' : 'bg-zinc-100 text-zinc-600'
+                      }`}
+                    >
+                      {passed ? '✓' : i + 1}
+                    </span>
+                    <span className="font-medium">{s.name}</span>
+                    {isNext && (
+                      <span className="ml-auto rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white">
+                        Next
+                      </span>
+                    )}
+                    {passed && <span className="ml-auto text-xs text-zinc-500">Passed</span>}
+                  </li>
+                )
+              })}
+            </ol>
+          )}
+        </section>
       )}
 
       <Toasts />
