@@ -305,7 +305,16 @@ export default function Home() {
           </Link>
           <nav className="hidden items-center gap-5 text-sm text-slate-300 md:flex">
             <Link href="/" onClick={() => setSelectedRouteId(null)} className="hover:text-white">Home</Link>
-            <a href="#live-tracker" className="hover:text-white">Live Buses</a>
+            <a
+              href="#live-tracker"
+              onClick={(e) => {
+                e.preventDefault()
+                document.getElementById('live-tracker')?.scrollIntoView({ behavior: 'smooth' })
+              }}
+              className="hover:text-white"
+            >
+              Live Buses
+            </a>
             <Link href="/admin" className="hover:text-white">Admin</Link>
           </nav>
           <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${live ? 'bg-green-500/15 text-green-400' : 'bg-slate-700/60 text-slate-300'}`}>
@@ -342,12 +351,20 @@ export default function Home() {
                 <div className="mt-6 flex flex-wrap gap-3">
                   <a
                     href="#live-tracker"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      document.getElementById('live-tracker')?.scrollIntoView({ behavior: 'smooth' })
+                    }}
                     className="rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-400"
                   >
                     Open Live Tracker
                   </a>
                   <a
                     href="#live-tracker"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      document.getElementById('live-tracker')?.scrollIntoView({ behavior: 'smooth' })
+                    }}
                     className="rounded-lg border border-slate-600 px-5 py-2.5 text-sm font-semibold text-slate-200 hover:border-slate-400"
                   >
                     View Routes
@@ -416,7 +433,14 @@ export default function Home() {
                     })}
                   </ul>
                 )}
-                <a href="#live-tracker" className="mt-3 block text-center text-xs font-semibold text-amber-400 hover:text-amber-300">
+                <a
+                  href="#live-tracker"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    document.getElementById('live-tracker')?.scrollIntoView({ behavior: 'smooth' })
+                  }}
+                  className="mt-3 block text-center text-xs font-semibold text-amber-400 hover:text-amber-300"
+                >
                   View All {routes.length} Routes →
                 </a>
               </aside>
@@ -500,7 +524,9 @@ export default function Home() {
                             {r.start_point ?? '—'} → {r.end_point ?? '—'}
                           </p>
                           <p className="mt-0.5 truncate text-xs text-slate-400">
-                            Driver: {rDrivers.length ? rDrivers.map((d) => d.name).join(', ') : 'Not assigned'}
+                            Driver: {rDrivers.length
+                              ? rDrivers.map((d) => `${d.name}${d.phone ? ` (${d.phone})` : ''}`).join(', ')
+                              : 'Not assigned'}
                             {bus ? ` · ${bus.plate_number}` : ''}
                           </p>
                         </div>
@@ -529,6 +555,20 @@ export default function Home() {
                           <span> · {formatDistance(p.nextDistanceKm)} away</span>
                         )}
                       </p>
+
+                      {r.stops?.length ? (
+                        <div className="mt-2 border-t border-slate-800 pt-2">
+                          <p className="text-[11px] font-semibold tracking-wider text-slate-400">ALL STOPS</p>
+                          <ol className="mt-1 space-y-0.5 text-xs text-slate-300">
+                            {r.stops.map((s, i) => (
+                              <li key={`${s.name}-${i}`} className="flex gap-2">
+                                <span className="font-semibold text-amber-400">{i + 1}.</span>
+                                <span>{s.name}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      ) : null}
 
                       <button
                         onClick={() => setSelectedRouteId(r.id)}
