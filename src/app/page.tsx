@@ -76,7 +76,6 @@ export default function Home() {
   // Buses now arrive over Realtime — only toast a load failure once, on first load
   const firstBusLoad = useRef(true)
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
 
   const fetchBuses = useCallback(async () => {
@@ -269,21 +268,13 @@ export default function Home() {
       ? formatEta(progress.nextDistanceKm, routeSpeed)
       : '—'
 
-  // ---- Home search + filter ----------------------------------------------
-  const query = searchQuery.trim().toLowerCase()
+  // ---- Home filter --------------------------------------------------------
+  // No search box — only 4–5 routes, so the grid lists all of them.
   const filteredRoutes = routes.filter((r) => {
-    const rDrivers = drivers.filter((d) => d.route_id === r.id)
     const rBuses = buses.filter((b) => b.route_id === r.id)
     if (filter === 'live' && !rBuses.some((b) => isBusLive(b, now))) return false
     if (filter === 'offline' && rBuses.some((b) => isBusLive(b, now))) return false
-    if (!query) return true
-    return (
-      r.name.toLowerCase().includes(query) ||
-      (r.start_point ?? '').toLowerCase().includes(query) ||
-      (r.end_point ?? '').toLowerCase().includes(query) ||
-      rDrivers.some((d) => d.name.toLowerCase().includes(query)) ||
-      rBuses.some((b) => b.plate_number.toLowerCase().includes(query))
-    )
+    return true
   })
   const liveRouteCount = routes.filter((r) =>
     buses.some((b) => b.route_id === r.id && isBusLive(b, now)),
@@ -348,28 +339,6 @@ export default function Home() {
                   See exactly where your bus is right now — live position, speed,
                   and next stop across CUVAS routes. Free, no login, no app needed.
                 </p>
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <a
-                    href="#live-tracker"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      document.getElementById('live-tracker')?.scrollIntoView({ behavior: 'smooth' })
-                    }}
-                    className="rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-400"
-                  >
-                    Open Live Tracker
-                  </a>
-                  <a
-                    href="#live-tracker"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      document.getElementById('live-tracker')?.scrollIntoView({ behavior: 'smooth' })
-                    }}
-                    className="rounded-lg border border-slate-600 px-5 py-2.5 text-sm font-semibold text-slate-200 hover:border-slate-400"
-                  >
-                    View Routes
-                  </a>
-                </div>
                 <p className="mt-5 text-xs text-slate-500">
                   Free for students · No login · Works on slow networks
                 </p>
@@ -444,22 +413,6 @@ export default function Home() {
                   View All {routes.length} Routes →
                 </a>
               </aside>
-            </div>
-          </section>
-
-          {/* Search */}
-          <section className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-              <label htmlFor="bus-search" className="text-sm font-semibold text-white">Search Any Bus</label>
-              <p className="text-xs text-slate-400">Enter route, driver, place or plate number to start tracking</p>
-              <input
-                id="bus-search"
-                className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-amber-500"
-                type="search"
-                placeholder="Search by route, driver, place or plate…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
             </div>
           </section>
 

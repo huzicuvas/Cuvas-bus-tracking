@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -41,6 +42,40 @@ export default function BusMap({ buses, stops }: { buses: Bus[]; stops: RouteSto
 
   const line: [number, number][] = locatedStops.map((s) => [s.lat!, s.lng!])
 
+  // Road-following route line: ask OSRM (free, no key) for the driving
+  // route through the stops, so the line follows real roads instead of
+  // cutting straight across like a plane. Falls back to the straight
+  // stop-to-stop line while loading, or if the request fails.
+  const [roadLine, setRoadLine] = useState<[number, number][] | null>(null)
+  useEffect(() => {
+    if (locatedStops.length < 2) {
+      setRoadLine(null)
+      return
+    }
+    let cancelled = false
+    const coords = locatedStops.map((s) => `${s.lng},${s.lat}`).join(';')
+    fetch(
+      `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`,
+    )
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('OSRM error'))))
+      .then((data) => {
+        const geom = data?.routes?.[0]?.geometry?.coordinates as
+          | [number, number][]
+          | undefined
+        if (!cancelled && geom && geom.length >= 2) {
+          setRoadLine(geom.map(([lng, lat]) => [lat, lng] as [number, number]))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRoadLine(null)
+      })
+    return () => {
+      cancelled = true
+    }
+    // Re-run only when the stop set changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(locatedStops)])
+
   return (
     <MapContainer center={center} zoom={13} style={{ height: '500px', width: '100%' }} className="z-0 rounded-xl">
       {/* Esri World Street Map: clean light map, free, no API key needed.
@@ -50,7 +85,7 @@ export default function BusMap({ buses, stops }: { buses: Bus[]; stops: RouteSto
         attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
       />
-      {line.length >= 2 && <Polyline positions={line} color="#22c55e" weight={4} />}
+      {line.length >= 2 && <Polyline positions={roadLine ?? line} color="#22c55e" weight={4} />}
       {stops.map((s, i) =>
         s.lat != null && s.lng != null ? (
           <Marker key={`${s.name}-${i}`} position={[s.lat, s.lng]} icon={stopIcon(i + 1)}>
