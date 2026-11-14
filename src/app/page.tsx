@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '@/lib/supabase'
-import type { Bus } from '@/lib/types'
+import type { Bus, Route } from '@/lib/types'
+import AdminForms from '@/components/AdminForms'
 
 // Leaflet touches window/document on import, so the map must load
 // client-side only — a direct import in an App Router page crashes the build.
@@ -29,6 +30,7 @@ function timeAgo(iso: string | null): string {
 
 export default function Home() {
   const [buses, setBuses] = useState<Bus[]>([])
+  const [routes, setRoutes] = useState<Route[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
@@ -46,11 +48,27 @@ export default function Home() {
     setLoading(false)
   }, [])
 
+  const fetchRoutes = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('routes')
+      .select('*')
+      .order('name', { ascending: true })
+    if (!error && data) {
+      setRoutes(data as Route[])
+    }
+  }, [])
+
+  const refreshAll = useCallback(() => {
+    fetchBuses()
+    fetchRoutes()
+  }, [fetchBuses, fetchRoutes])
+
   useEffect(() => {
     fetchBuses()
+    fetchRoutes()
     const id = setInterval(fetchBuses, 10000)
     return () => clearInterval(id)
-  }, [fetchBuses])
+  }, [fetchBuses, fetchRoutes])
 
   return (
     <main className="mx-auto w-full max-w-6xl p-4 sm:p-6">
@@ -99,6 +117,8 @@ export default function Home() {
           </ul>
         )}
       </section>
+
+      <AdminForms routes={routes} onAdded={refreshAll} />
     </main>
   )
 }

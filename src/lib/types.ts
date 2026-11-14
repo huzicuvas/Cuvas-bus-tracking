@@ -1,3 +1,18 @@
+export type RouteStop = {
+  name: string
+  lat?: number
+  lng?: number
+}
+
+export type Route = {
+  id: string
+  name: string
+  start_point: string | null
+  end_point: string | null
+  stops: RouteStop[]
+  created_at: string
+}
+
 export type Bus = {
   id: string
   plate_number: string
