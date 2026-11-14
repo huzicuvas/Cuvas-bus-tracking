@@ -31,6 +31,13 @@ function timeAgo(iso: string | null): string {
   return new Date(iso).toLocaleString()
 }
 
+// A bus counts as live ("Running") only when it is marked running AND its
+// location was updated in the last 60 seconds.
+function isBusLive(bus: Bus): boolean {
+  if (bus.status !== 'running' || !bus.last_updated) return false
+  return Date.now() - new Date(bus.last_updated).getTime() < 60_000
+}
+
 export default function Home() {
   const [buses, setBuses] = useState<Bus[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -40,6 +47,8 @@ export default function Home() {
   const [busError, setBusError] = useState('')
   const [deletingBus, setDeletingBus] = useState<Bus | null>(null)
   const [busDeleteBusy, setBusDeleteBusy] = useState(false)
+  const [routeFilter, setRouteFilter] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
 
   const fetchBuses = useCallback(async () => {
     const { data, error } = await supabase
@@ -117,6 +126,25 @@ export default function Home() {
     return () => clearInterval(id)
   }, [fetchBuses, fetchRoutes, fetchDrivers])
 
+  // Summary counts (recomputed on every refresh, so the 60-second
+  // running/offline line moves as locations go stale)
+  const busesRunning = buses.filter(isBusLive).length
+  const routesActive = routes.filter((r) =>
+    buses.some((b) => b.route_id === r.id && isBusLive(b)),
+  ).length
+  const driversOnDuty = drivers.filter((d) => d.status === 'on_duty').length
+
+  const query = searchQuery.trim().toLowerCase()
+  const filteredBuses = buses.filter((b) => {
+    if (routeFilter && b.route_id !== routeFilter) return false
+    if (!query) return true
+    return (
+      b.plate_number.toLowerCase().includes(query) ||
+      (b.drivers?.name ?? '').toLowerCase().includes(query)
+    )
+  })
+  const filtersActive = routeFilter !== '' || query !== ''
+
   return (
     <main className="mx-auto w-full max-w-6xl p-4 sm:p-6">
       <header className="mb-4">
@@ -127,31 +155,91 @@ export default function Home() {
         </p>
       </header>
 
+      <section className="mb-4 grid grid-cols-3 gap-3">
+        <div className="rounded-xl border p-3 text-center">
+          <p className="text-2xl font-bold text-green-700">{busesRunning}</p>
+          <p className="text-xs text-zinc-500">Buses running</p>
+        </div>
+        <div className="rounded-xl border p-3 text-center">
+          <p className="text-2xl font-bold">{routesActive}</p>
+          <p className="text-xs text-zinc-500">Routes active</p>
+        </div>
+        <div className="rounded-xl border p-3 text-center">
+          <p className="text-2xl font-bold">{driversOnDuty}</p>
+          <p className="text-xs text-zinc-500">Drivers on duty</p>
+        </div>
+      </section>
+
       <BusMap buses={buses} />
 
       <section className="mt-6">
-        <h2 className="mb-3 text-lg font-semibold">Buses ({buses.length})</h2>
+        <h2 className="mb-3 text-lg font-semibold">
+          Buses ({filteredBuses.length}
+          {filtersActive ? ` of ${buses.length}` : ''})
+        </h2>
         {busError && <p className="mb-3 text-sm text-red-600">{busError}</p>}
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+          <select
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+            value={routeFilter}
+            onChange={(e) => setRouteFilter(e.target.value)}
+            aria-label="Filter by route"
+          >
+            <option value="">All routes</option>
+            {routes.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <input
+            className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+            type="search"
+            placeholder="Search by driver name or plate number"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {filtersActive && (
+            <button
+              onClick={() => {
+                setRouteFilter('')
+                setSearchQuery('')
+              }}
+              className="rounded-lg border px-3 py-2 text-sm hover:bg-zinc-50"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
         {loading ? (
           <p className="text-zinc-500">Loading buses...</p>
         ) : buses.length === 0 ? (
           <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
             No buses on the road right now
           </p>
+        ) : filteredBuses.length === 0 ? (
+          <p className="rounded-xl border border-dashed p-6 text-center text-zinc-500">
+            No buses match your filter
+          </p>
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2">
-            {buses.map((bus) => (
-              <li key={bus.id} className="rounded-xl border p-4">
+            {filteredBuses.map((bus) => (
+              <li
+                key={bus.id}
+                className={`rounded-xl border p-4 ${
+                  isBusLive(bus) ? 'border-green-300' : ''
+                }`}
+              >
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">{bus.plate_number}</span>
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      bus.status === 'running'
+                      isBusLive(bus)
                         ? 'bg-green-100 text-green-800'
                         : 'bg-zinc-100 text-zinc-600'
                     }`}
                   >
-                    {bus.status}
+                    {isBusLive(bus) ? 'Running' : 'Offline'}
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-zinc-600">
