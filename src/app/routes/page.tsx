@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { showToast } from '@/lib/toast'
-import { isBusLive } from '@/lib/live'
+import { formatTime12, isBusLive } from '@/lib/live'
 import type { Bus, Driver, Route } from '@/lib/types'
 import Toasts from '@/components/Toasts'
 
@@ -103,6 +103,12 @@ export default function RoutesPage() {
                       <p className="mt-0.5 text-sm text-slate-400">
                         {r.start_point ?? '—'} → {r.end_point ?? '—'}
                       </p>
+                      {r.departure_time ? (
+                        <p className="mt-0.5 text-sm font-semibold text-amber-300">
+                          Departs {formatTime12(r.departure_time)}
+                          {r.start_point ? ` from ${r.start_point}` : ''}
+                        </p>
+                      ) : null}
                       <p className="mt-1 text-sm text-slate-300">
                         Bus:{' '}
                         <span className="font-semibold text-white">

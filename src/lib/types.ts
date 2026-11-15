@@ -10,6 +10,9 @@ export type Route = {
   start_point: string | null
   end_point: string | null
   stops: RouteStop[]
+  // When the run leaves its start point, "HH:MM" 24-hour (e.g. "07:00").
+  // Only the departure is fixed — later stops depend on traffic.
+  departure_time?: string | null
   created_at: string
 }
 

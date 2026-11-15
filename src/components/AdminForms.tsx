@@ -33,6 +33,7 @@ function RouteForm({ onAdded }: { onAdded: () => void }) {
   const [name, setName] = useState('')
   const [startPoint, setStartPoint] = useState('')
   const [endPoint, setEndPoint] = useState('')
+  const [departureTime, setDepartureTime] = useState('')
   const [stopsText, setStopsText] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -44,11 +45,16 @@ function RouteForm({ onAdded }: { onAdded: () => void }) {
       setError('Route name is required.')
       return
     }
+    if (departureTime.trim() && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(departureTime.trim())) {
+      setError('Departure time must be HH:MM, e.g. 07:00.')
+      return
+    }
     setBusy(true)
     const { error } = await supabase.from('routes').insert({
       name: name.trim(),
       start_point: startPoint.trim() || null,
       end_point: endPoint.trim() || null,
+      departure_time: departureTime.trim() || null,
       stops: parseStops(stopsText),
     })
     setBusy(false)
@@ -59,6 +65,7 @@ function RouteForm({ onAdded }: { onAdded: () => void }) {
     setName('')
     setStartPoint('')
     setEndPoint('')
+    setDepartureTime('')
     setStopsText('')
     showToast('Route added.')
     onAdded()
@@ -102,6 +109,18 @@ function RouteForm({ onAdded }: { onAdded: () => void }) {
             value={endPoint}
             onChange={(e) => setEndPoint(e.target.value)}
             placeholder="CUVAS campus"
+          />
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="route-departure">
+            Departure time (24-hour, e.g. 07:00 — when the bus leaves its start point)
+          </label>
+          <input
+            id="route-departure"
+            className={inputCls}
+            value={departureTime}
+            onChange={(e) => setDepartureTime(e.target.value)}
+            placeholder="07:00"
           />
         </div>
         <div>

@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { showToast } from '@/lib/toast'
-import { isBusLive, timeAgo } from '@/lib/live'
+import { formatTime12, isBusLive, timeAgo } from '@/lib/live'
 import { computeStopProgress, haversineKm } from '@/lib/geo'
 import type { Bus, Driver, Route } from '@/lib/types'
 import Toasts from '@/components/Toasts'
@@ -505,6 +505,11 @@ export default function Home() {
                               : 'Not assigned'}
                             {bus ? ` · ${bus.plate_number}` : ''}
                           </p>
+                          {r.departure_time ? (
+                            <p className="mt-0.5 truncate text-xs font-semibold text-amber-300">
+                              Departs {formatTime12(r.departure_time)}
+                            </p>
+                          ) : null}
                         </button>
                         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.badge}`}>
                           {st.label}
@@ -570,6 +575,12 @@ export default function Home() {
                 {' · '}Driver: {routeDrivers.length ? routeDrivers.map((d) => d.name).join(', ') : 'Not assigned'}
                 {routeBus ? ` · Bus ${routeBus.plate_number}` : ''}
               </p>
+              {selectedRoute.departure_time ? (
+                <p className="mt-1 text-sm font-semibold text-amber-300">
+                  Departs {formatTime12(selectedRoute.departure_time)}
+                  {selectedRoute.start_point ? ` from ${selectedRoute.start_point}` : ''}
+                </p>
+              ) : null}
             </div>
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ${routeStatus.badge}`}>
               {routeStatus.label}
